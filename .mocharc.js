@@ -1,4 +1,5 @@
 module.exports = {
     recursive: true,
-    reporter: "list"
+    reporter: "list",
+    require: "@babel/register"
 };

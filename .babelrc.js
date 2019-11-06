@@ -8,16 +8,7 @@ function stripVersion(stringVersion) {
 }
 
 module.exports = {
-    plugins: [
-        "@babel/transform-react-jsx",
-        "@babel/plugin-proposal-class-properties",
-        [
-            "@babel/plugin-proposal-decorators",
-            {
-                decoratorsBeforeExport: true
-            }
-        ]
-    ],
+    plugins: ["@babel/transform-react-jsx"],
     presets: [
         [
             "@babel/preset-env",

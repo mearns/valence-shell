@@ -18,7 +18,7 @@ describe("pty", () => {
                 )
             ],
             {}
-        );
+        ).stream;
 
         const [pid, stdout] = await Promise.all([
             awaitStream(
@@ -46,7 +46,7 @@ describe("pty", () => {
                     )
                 ],
                 {}
-            );
+            ).stream;
             const exitCode = await awaitStream(
                 stream
                     .filter(event => event.type === "exitCode")
@@ -65,7 +65,7 @@ describe("pty", () => {
                 )
             ],
             {}
-        );
+        ).stream;
         const [stdout, stderr] = await Promise.all([
             awaitStream(
                 stream

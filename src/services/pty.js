@@ -2,6 +2,13 @@ import path from "path";
 import { spawn } from "child_process";
 import xs from "xstream";
 
+export default function pty(commandArgs, spawnOptions) {
+    const pty = new Pty(commandArgs, spawnOptions);
+    return {
+        stream: pty.stream
+    };
+}
+
 const COMMANDS_WITH_INPUT = Object.freeze(new Set(["O", "E", "I", "C"]));
 
 function commandHasInput(mneu) {
@@ -17,14 +24,18 @@ const PTY_COMMAND_STREAM_NAMES = Object.freeze({
 
 const PTY_COMMAND_PATH = path.resolve(__dirname, "../../lib/pty/pty");
 
-export default function streamPty(commandArgs, spawnOptions) {
-    const pty = new Pty(commandArgs, spawnOptions);
-    return xs.create({
-        start(listener) {
-            pty.stream(listener);
+function createStream() {
+    let listener;
+    const producer = {
+        start: providedListener => {
+            listener = providedListener;
         },
-        stop() {}
-    });
+        stop: () => {}
+    };
+    const stream = xs.create(producer);
+    // Ensure our producer starts. We'll do it live.
+    stream.addListener({ next() {} });
+    return { listener, stream };
 }
 
 class Pty {
@@ -33,19 +44,15 @@ class Pty {
         this._pendingCommand = null;
         this._commandInputBuffer = [];
         this._bufferedInputLength = 0;
-        this.commandArgs = commandArgs;
-        this.spawnOptions = spawnOptions;
-    }
-
-    stream(listener) {
+        const { stream, listener } = createStream();
+        this.stream = stream;
         this.listener = listener;
-        const process = spawn(
-            PTY_COMMAND_PATH,
-            this.commandArgs,
-            this.spawnOptions
-        );
+
+        const process = spawn(PTY_COMMAND_PATH, commandArgs, spawnOptions);
+
         this.stdin = process.stdin;
-        this.kill = process.kill.bind(process);
+        this.signal = process.kill.bind(process);
+
         process.on("error", error => {
             let errorMessage = `Error launching pty: ${error.message}`;
             if (error.code === "ENOENT") {
@@ -59,13 +66,16 @@ class Pty {
             ce.name = error.name;
             this.listener.error(ce);
         });
+
         process.stdout.on("data", chunk => this.append(chunk));
+
         process.stdout.on("close", chunk => {
             if (chunk) {
                 this.append(chunk);
             }
             this.flush();
         });
+
         process.on("exit", (code, signal) => {
             if (code || signal) {
                 this.listener.error(new Error("pty exited unexpectedly"));

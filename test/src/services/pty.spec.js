@@ -9,6 +9,79 @@ import path from "path";
 import { expect } from "chai";
 
 describe("pty", () => {
+    [
+        // prettier-ignore
+        ["SIGHUP", 1],
+        ["SIGTERM", 15]
+    ].forEach(([signal, signalCode]) => {
+        it(`should expose a method for signaling ${signal} to the process`, async () => {
+            const proc = pty(
+                [
+                    path.resolve(
+                        __dirname,
+                        "../../test-resources/pty-test-scripts/sleep-test.bash"
+                    )
+                ],
+                {}
+            );
+
+            proc.stream.addListener({
+                next(event) {
+                    // FIXME: Document that you can't signal or probably use stdin until
+                    // the child process has been started by the pty, which is from the "started"
+                    // event.
+                    if (event.type === "started") {
+                        proc.signal(signal);
+                    }
+                },
+                error(error) {
+                    // console.error(error);
+                },
+                complete() {
+                    // console.log("---complete---");
+                }
+            });
+            const [exitSignal] = await Promise.all([
+                awaitStream(
+                    proc.stream
+                        .filter(event => event.type === "signal")
+                        .map(event => {
+                            // console.log("Got signal", event);
+                            return event.signal;
+                        })
+                ),
+                awaitStream(proc.stream)
+            ]);
+            expect(exitSignal).equals(signalCode);
+        });
+    });
+
+    // it("should expose a method for signaling SIGINT to the process", async () => {
+    //     const proc = pty(
+    //         [
+    //             path.resolve(
+    //                 __dirname,
+    //                 "../../test-resources/pty-test-scripts/sigint-test.bash"
+    //             )
+    //         ],
+    //         {}
+    //     );
+
+    //     proc.stream.addListener({
+    //         next(event) {
+    //             if (event.type === "pid") {
+    //                 proc.signal("SIGINT");
+    //             }
+    //         }
+    //     });
+    //     const exitCode = await awaitStream(
+    //         proc.stream
+    //             .filter(event => event.type === "exitCode")
+    //             .map(event => event.code)
+    //     );
+    //     expect(exitCode).equals(0);
+    // });
+
     it("should emit the pid of the process", async () => {
         const stream = pty(
             [

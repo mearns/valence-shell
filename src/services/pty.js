@@ -5,11 +5,14 @@ import xs from "xstream";
 export default function pty(commandArgs, spawnOptions) {
     const pty = new Pty(commandArgs, spawnOptions);
     return {
-        stream: pty.stream
+        stream: pty.stream,
+        stdin: pty.stdin,
+        signal: pty.signal
     };
 }
 
 const COMMANDS_WITH_INPUT = Object.freeze(new Set(["O", "E", "I", "C"]));
+const COMMS_COMMAND_MNEU = "C";
 
 function commandHasInput(mneu) {
     return COMMANDS_WITH_INPUT.has(mneu);
@@ -104,6 +107,12 @@ class Pty {
     }
 
     processCommandWithInput(mneu, input) {
+        if (mneu === COMMS_COMMAND_MNEU) {
+            const message = input.toString("utf8");
+            if (message === "START\n") {
+                this.listener.next({ type: "started" });
+            }
+        }
         const streamName = PTY_COMMAND_STREAM_NAMES[mneu];
         if (streamName) {
             this.listener.next({

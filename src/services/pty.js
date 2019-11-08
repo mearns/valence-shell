@@ -1,14 +1,11 @@
 import path from "path";
 import { spawn } from "child_process";
 import xs from "xstream";
+import { causedBy } from "./errors";
 
 export default function pty(commandArgs, spawnOptions) {
     const pty = new Pty(commandArgs, spawnOptions);
-    return {
-        stream: pty.stream,
-        stdin: pty.stdin,
-        signal: pty.signal
-    };
+    return pty.stream;
 }
 
 const COMMANDS_WITH_INPUT = Object.freeze(new Set(["O", "E", "I", "C"]));
@@ -53,8 +50,18 @@ class Pty {
 
         const process = spawn(PTY_COMMAND_PATH, commandArgs, spawnOptions);
 
-        this.stdin = process.stdin;
-        this.signal = process.kill.bind(process);
+        const stdin = process.stdin;
+        const signal = process.kill.bind(process);
+        this._controlListener = {
+            next: event => {
+                console.log("Control stream: ", event);
+                this._processControlEvent(event, signal, stdin);
+            },
+            error: error => this._processControlError(error),
+            complete: () => {
+                console.log("Control stream complete");
+            }
+        };
 
         process.on("error", error => {
             let errorMessage = `Error launching pty: ${error.message}`;
@@ -110,16 +117,79 @@ class Pty {
         if (mneu === COMMS_COMMAND_MNEU) {
             const message = input.toString("utf8");
             if (message === "START\n") {
-                this.listener.next({ type: "started" });
+                this.listener.next({
+                    type: "ready",
+                    subscribeToControlStream: stream =>
+                        stream.subscribe(this._controlListener),
+                    subscribeToSignalStream: stream =>
+                        stream.subscribe({
+                            ...this._controlListener,
+                            next: signal =>
+                                this._controlListener.next({
+                                    type: "signal",
+                                    signal
+                                })
+                        }),
+                    subscribeToInputStream: (streamName, stream) =>
+                        stream.subscribe({
+                            ...this._controlListener,
+                            next: chunk =>
+                                this._controlListener.next({
+                                    type: "stream-data",
+                                    stream: streamName,
+                                    chunk
+                                })
+                        })
+                });
             }
         }
         const streamName = PTY_COMMAND_STREAM_NAMES[mneu];
         if (streamName) {
             this.listener.next({
-                type: "stream",
+                type: "stream-data",
                 stream: streamName,
                 chunk: input
             });
+        }
+    }
+
+    _processControlEvent(event, signal, stdin) {
+        switch (event.type) {
+            case "signal":
+                console.log("processing control signal", event);
+                signal(event.signal);
+                this.listener.next({
+                    type: "process-signaled",
+                    signal: event.signal
+                });
+                break;
+
+            case "stream-data":
+                if (event.stream === "stdin") {
+                    stdin.write(event.chunk, error => {
+                        if (error) {
+                            this.listener.next({
+                                type: "error",
+                                error: causedBy(
+                                    new Error("Error writing to stdin"),
+                                    error
+                                )
+                            });
+                        } else {
+                            this.listener.next({
+                                type: "stream-data",
+                                stream: event.stream,
+                                chunk: event.chunk
+                            });
+                        }
+                    });
+                } else {
+                    this.listener.next({
+                        type: "error",
+                        error: new Error(`Unknown stream: ${event.stream}`)
+                    });
+                }
+                break;
         }
     }
 

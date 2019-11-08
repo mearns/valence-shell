@@ -20,6 +20,7 @@
 #define CMD_STDIN 'I'
 #define CMD_COMMS 'C'
 #define CMD_SLAVE_PID 'P'
+#define CMD_MASTER_PID 'M'
 #define CMD_DEBUG 'D'
 
 extern char **environ;
@@ -39,7 +40,7 @@ void write_all(const int fd, const char *const buffer, const int length)
     }
 }
 
-#define DEBUG 0
+#define DEBUG 1
 
 void write_command(const char mneumonic, const int arg, const char *const str, const int str_length)
 {
@@ -50,6 +51,9 @@ void write_command(const char mneumonic, const int arg, const char *const str, c
     {
     case CMD_SLAVE_PID:
         write_all(STDOUT_FILENO, "Slave PID:", 10);
+        break;
+    case CMD_MASTER_PID:
+        write_all(STDOUT_FILENO, "Master PID:", 11);
         break;
     case CMD_COMMS:
         write_all(STDOUT_FILENO, "Comms:", 6);
@@ -134,8 +138,11 @@ void handle_term(const int sig)
     if (slave_pid > 0)
     {
         int stat = 0;
+        debug("Signal received", sig);
         kill(slave_pid, sig);
+        debug("Killed slave PID", slave_pid);
         waitpid(slave_pid, &stat, 0);
+        debug("Child exited", stat);
         child_exit(stat);
     }
     exit(0);
@@ -314,6 +321,7 @@ int main(const int argc, char **argv)
         return ret;
     default:
         // Master process
+        write_short_command(CMD_MASTER_PID, getpid());
 
         // Close the slave side of the PTY (the slave still has it open)
         close(slave);

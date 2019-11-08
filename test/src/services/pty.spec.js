@@ -7,80 +7,76 @@ import pty from "../../../src/services/pty";
 // Support
 import path from "path";
 import { expect } from "chai";
+import xs from "xstream";
 
 describe("pty", () => {
     [
         // prettier-ignore
-        ["SIGHUP", 1],
-        ["SIGTERM", 15]
-    ].forEach(([signal, signalCode]) => {
+        "SIGHUP",
+        "SIGTERM"
+    ].forEach(signal => {
         it(`should expose a method for signaling ${signal} to the process`, async () => {
-            const proc = pty(
+            const stream = pty(
                 [
                     path.resolve(
                         __dirname,
-                        "../../test-resources/pty-test-scripts/sleep-test.bash"
+                        "../../test-resources/pty-test-scripts/sleep.bash"
                     )
                 ],
                 {}
             );
 
-            proc.stream.addListener({
+            const signalStream = xs.create({
+                start(listener) {
+                    setTimeout(() => {
+                        listener.next({
+                            type: "signal",
+                            signal
+                        });
+                        listener.complete();
+                    }, 10);
+                },
+                stop() {}
+            });
+
+            stream.addListener({
                 next(event) {
-                    // FIXME: Document that you can't signal or probably use stdin until
-                    // the child process has been started by the pty, which is from the "started"
-                    // event.
-                    if (event.type === "started") {
-                        proc.signal(signal);
+                    if (event.type === "ready") {
+                        event.subscribeToControlStream(signalStream);
                     }
-                },
-                error(error) {
-                    // console.error(error);
-                },
-                complete() {
-                    // console.log("---complete---");
                 }
             });
-            const [exitSignal] = await Promise.all([
+            const [stdout, exitCode, exitSignal] = await Promise.all([
                 awaitStream(
-                    proc.stream
+                    stream
+                        .filter(event => event.stream === "stdout")
+                        .map(event => event.chunk.toString("utf8"))
+                        .debug(event => {
+                            console.log("XXXX", event);
+                        })
+                        .fold(concatStrings, "")
+                ),
+                awaitStream(
+                    stream
+                        .filter(event => event.type === "exitCode")
+                        .map(event => {
+                            return event.code;
+                        })
+                ),
+                awaitStream(
+                    stream
                         .filter(event => event.type === "signal")
                         .map(event => {
-                            // console.log("Got signal", event);
                             return event.signal;
                         })
                 ),
-                awaitStream(proc.stream)
+                awaitStream(signalStream)
             ]);
-            expect(exitSignal).equals(signalCode);
+            // expect(exitSignal).to.be.undefined;
+            // expect(exitCode).to.equal(0);
+            // expect(stdout).to.equal(`${signal.toLowerCase()} trapped\n`);
         });
     });
-
-    // it("should expose a method for signaling SIGINT to the process", async () => {
-    //     const proc = pty(
-    //         [
-    //             path.resolve(
-    //                 __dirname,
-    //                 "../../test-resources/pty-test-scripts/sigint-test.bash"
-    //             )
-    //         ],
-    //         {}
-    //     );
-
-    //     proc.stream.addListener({
-    //         next(event) {
-    //             if (event.type === "pid") {
-    //                 proc.signal("SIGINT");
-    //             }
-    //         }
-    //     });
-    //     const exitCode = await awaitStream(
-    //         proc.stream
-    //             .filter(event => event.type === "exitCode")
-    //             .map(event => event.code)
-    //     );
-    //     expect(exitCode).equals(0);
-    // });
 
     it("should emit the pid of the process", async () => {
         const stream = pty(
@@ -91,7 +87,7 @@ describe("pty", () => {
                 )
             ],
             {}
-        ).stream;
+        );
 
         const [pid, stdout] = await Promise.all([
             awaitStream(
@@ -119,7 +115,8 @@ describe("pty", () => {
                     )
                 ],
                 {}
-            ).stream;
+            );
+
             const exitCode = await awaitStream(
                 stream
                     .filter(event => event.type === "exitCode")
@@ -138,7 +135,8 @@ describe("pty", () => {
                 )
             ],
             {}
-        ).stream;
+        );
+
         const [stdout, stderr] = await Promise.all([
             awaitStream(
                 stream
